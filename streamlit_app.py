@@ -1,197 +1,62 @@
-import os
 import streamlit as st
-import pandas as pd
-import joblib
 import requests
-from pathlib import Path
 
-# =====================================
-# 1. PAGE CONFIGURATION
-# =====================================
+st.set_page_config(page_title="EV Battery Failure Predictor", layout="wide")
+st.title("EV Battery Failure Prediction")
 
-st.set_page_config(
-    page_title="EV Battery Failure Prediction",
-    page_icon="🔋",
-    layout="wide"
-)
-
-st.title("🔋 EV Battery Failure Prediction")
-
-st.write(
-    "Enter battery details to predict whether "
-    "an EV battery is likely to fail."
-)
-
-# =====================================
-# 2. LOAD DATA AND MODEL
-# =====================================
-
-BASE_DIR = Path(__file__).resolve().parent
-
-DATA_PATH = BASE_DIR / "ev_battery_failure_dataset.csv"
-MODEL_PATH = BASE_DIR / "backend" / "model.pkl"
-
-API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/predict")
-
-
-@st.cache_data
-def load_data():
-    return pd.read_csv(DATA_PATH)
-
-
-@st.cache_resource
-def load_model():
-    return joblib.load(MODEL_PATH)
-
-
-df = load_data()
-model_data = load_model()
-
-feature_columns = model_data["feature_columns"]
-
-# =====================================
-# 3. INPUT FORM
-# =====================================
-
-st.subheader("Enter Battery Information")
-
-battery_details = {}
+API_URL = "https://ev-battery-failure-prediction-7m2n.onrender.com/predict"
 
 with st.form("battery_form"):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        capacity_loss_percent = st.number_input("Capacity Loss (%)", 0.0, 100.0, 8.89)
+        state_of_health = st.number_input("State of Health (%)", 0.0, 100.0, 91.05)
+        battery_health_percent = st.number_input("Battery Health (%)", 0.0, 100.0, 91.11)
+        cell_voltage_std = st.number_input("Cell Voltage Std (V)", 0.0, 5.0, 0.01607, format="%.5f")
+        aging_score = st.number_input("Aging Score", 0.0, 100.0, 22.5)
+    with col2:
+        thermal_runaway_risk = st.number_input("Thermal Runaway Risk", 0.0, 100.0, 51.1)
+        charging_quality_score = st.number_input("Charging Quality Score", 0.0, 100.0, 53.6)
+        voltage_imbalance = st.number_input("Voltage Imbalance", 0.0, 100.0, 16.91)
+        charge_efficiency = st.number_input("Charge Efficiency (%)", 0.0, 100.0, 95.42)
+        cycle_count = st.number_input("Cycle Count", 0, 10000, 217)
+    with col3:
+        thermal_health_score = st.number_input("Thermal Health Score", 0.0, 100.0, 61.4)
+        odometer_km = st.number_input("Odometer (km)", 0.0, 1000000.0, 78887.0)
+        internal_resistance = st.number_input("Internal Resistance", 0.0, 10.0, 0.5412, format="%.4f")
+        fleet_or_private = st.selectbox("Usage Type", ["Private", "Fleet"])
+        battery_stress_index = st.number_input("Battery Stress Index", 0.0, 100.0, 33.2)
 
-    col1, col2 = st.columns(2)
+    submitted = st.form_submit_button("Predict Failure Risk")
 
-    for i, feature in enumerate(feature_columns):
-
-        current_col = col1 if i % 2 == 0 else col2
-
-        with current_col:
-
-            if feature not in df.columns:
-                st.error(f"Feature missing from dataset: {feature}")
-                st.stop()
-
-            if pd.api.types.is_numeric_dtype(df[feature]):
-
-                median_value = df[feature].median()
-
-                if pd.isna(median_value):
-                    median_value = 0.0
-
-                value = st.number_input(
-                    feature.replace("_", " ").title(),
-                    value=float(median_value),
-                    step=0.1,
-                    format="%.4f"
-                )
-
-                battery_details[feature] = value
-
-            else:
-
-                categories = (
-                    df[feature]
-                    .dropna()
-                    .unique()
-                    .tolist()
-                )
-
-                if len(categories) == 0:
-                    st.error(f"No available options for {feature}")
-                    st.stop()
-
-                value = st.selectbox(
-                    feature.replace("_", " ").title(),
-                    options=categories
-                )
-
-                battery_details[feature] = value
-
-    submit = st.form_submit_button(
-        "Predict Battery Failure",
-        use_container_width=True
-    )
-
-# =====================================
-# 4. PREDICTION
-# =====================================
-
-if submit:
-
+if submitted:
     payload = {
-        "battery_details": battery_details
+        "battery_details": {
+            "capacity_loss_percent": capacity_loss_percent,
+            "state_of_health": state_of_health,
+            "battery_health_percent": battery_health_percent,
+            "cell_voltage_std": cell_voltage_std,
+            "aging_score": aging_score,
+            "thermal_runaway_risk": thermal_runaway_risk,
+            "charging_quality_score": charging_quality_score,
+            "voltage_imbalance": voltage_imbalance,
+            "charge_efficiency": charge_efficiency,
+            "cycle_count": cycle_count,
+            "thermal_health_score": thermal_health_score,
+            "odometer_km": odometer_km,
+            "internal_resistance": internal_resistance,
+            "fleet_or_private": fleet_or_private,
+            "battery_stress_index": battery_stress_index,
+        }
     }
-
-    try:
-
-        with st.spinner("Analyzing battery information..."):
-
-            response = requests.post(
-                API_URL,
-                json=payload,
-                timeout=60
-            )
-
-        if response.status_code == 200:
-
-            result = response.json()
-
-            st.divider()
-            st.subheader("Prediction Result")
-
-            if result["prediction"] == 1:
-
-                st.error("⚠️ Battery Failure Predicted")
-
+    with st.spinner("Connecting to prediction server (may take up to 60s on first run)..."):
+        try:
+            res = requests.post(API_URL, json=payload, timeout=60)
+            res.raise_for_status()
+            output = res.json()
+            if output["prediction"] == 1:
+                st.error(f"{output['result']} — Failure Probability: {output['failure_probability']}%")
             else:
-
-                st.success("✅ No Battery Failure Predicted")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-
-                st.metric(
-                    "Prediction",
-                    result["result"]
-                )
-
-            with col2:
-
-                st.metric(
-                    "Battery Failure Probability",
-                    f'{result["failure_probability"]}%'
-                )
-
-            st.progress(
-                min(
-                    max(result["failure_probability"] / 100, 0.0),
-                    1.0
-                )
-            )
-
-        else:
-
-            st.error(
-                f"API Error: {response.status_code}"
-            )
-
-            st.write(response.text)
-
-    except requests.exceptions.ConnectionError:
-
-        st.error(
-            "Cannot connect to FastAPI. "
-            "Please start the backend first."
-        )
-
-    except requests.exceptions.RequestException as e:
-
-        st.error(f"Request failed: {e}")
-
-st.divider()
-
-st.caption(
-    "Educational ML project using a synthetic EV battery dataset. "
-    "Predictions are not a substitute for professional battery diagnostics."
-)
+                st.success(f"{output['result']} — Failure Probability: {output['failure_probability']}%")
+        except requests.exceptions.RequestException as e:
+            st.warning(f"API connection error: {e}")
